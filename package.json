@@ -1,0 +1,25 @@
+{
+  "name": "norwinapps",
+  "version": "0.1.0",
+  "description": "Hub / launcher for all NorwinLabs apps",
+  "main": "main.js",
+  "author": "NorwinLabs",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.norwinlabs.norwinapps",
+    "productName": "NorwinApps",
+    "files": ["main.js", "preload.js", "apps.json", "renderer/**/*"],
+    "win": { "target": "nsis" },
+    "mac": { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}

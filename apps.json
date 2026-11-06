@@ -1,0 +1,37 @@
+[
+  {
+    "id": "norwinvibe",
+    "name": "NorwinVibe",
+    "description": "Mechanical keyboard sound app.",
+    "repo": "NorwinLabs/NorwinVibe",
+    "private": false
+  },
+  {
+    "id": "norwinprep",
+    "name": "NorwinPrep",
+    "description": "Prep tool.",
+    "repo": "NorwinLabs/NorwinPrep",
+    "private": false
+  },
+  {
+    "id": "norwinlabstools",
+    "name": "NorwinLabsTools",
+    "description": "Collection of NorwinLabs utilities.",
+    "repo": "NorwinLabs/NorwinLabsTools",
+    "private": false
+  },
+  {
+    "id": "norwininventory",
+    "name": "NorwinInventory",
+    "description": "Inventory tracking.",
+    "repo": "NorwinLabs/NorwinInventory",
+    "private": true
+  },
+  {
+    "id": "norwinmouseassist",
+    "name": "NorwinMouseAssist",
+    "description": "Mouse assist utility.",
+    "repo": "NorwinLabs/NorwinMouseAssist",
+    "private": false
+  }
+]

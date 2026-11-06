@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'" />
+  <title>NorwinApps</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>NorwinApps</h1>
+    <div class="header-actions">
+      <input id="search" type="search" placeholder="Search apps…" />
+      <button id="settings-btn" title="Settings">Settings</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="grid" class="grid"></div>
+  </main>
+
+  <dialog id="settings">
+    <form method="dialog">
+      <h2>Settings</h2>
+      <label>
+        GitHub token (optional, for checking releases of private repos)
+        <input id="token" type="password" autocomplete="off" placeholder="ghp_…" />
+      </label>
+      <menu>
+        <button value="cancel">Cancel</button>
+        <button id="save-token" value="save">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+:root {
+  --bg: #0f1115;
+  --panel: #181b22;
+  --border: #272b35;
+  --text: #e6e8ee;
+  --muted: #8b92a3;
+  --accent: #5b8cff;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+header h1 { margin: 0; font-size: 20px; }
+.header-actions { display: flex; gap: 8px; }
+input, button {
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+button { cursor: pointer; }
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+main { padding: 24px; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.card-head { display: flex; align-items: center; justify-content: space-between; }
+.card h2 { margin: 0; font-size: 17px; }
+.badge {
+  font-size: 11px;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.desc { margin: 0; color: var(--muted); font-size: 14px; }
+.meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.msg { margin: 0; font-size: 12px; color: var(--muted); min-height: 1em; }
+dialog {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  min-width: 360px;
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 16px 0 0; }
