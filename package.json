@@ -8,7 +8,8 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "release": "electron-builder --publish always"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -17,9 +18,38 @@
   "build": {
     "appId": "com.norwinlabs.norwinapps",
     "productName": "NorwinApps",
-    "files": ["main.js", "preload.js", "apps.json", "renderer/**/*"],
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg" },
-    "linux": { "target": "AppImage" }
+    "files": [
+      "main.js",
+      "preload.js",
+      "apps.json",
+      "renderer/**/*"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": "AppImage"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "NorwinLabs",
+        "repo": "NorwinAppsLauncher",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NorwinLabs/NorwinAppsLauncher.git"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   }
 }

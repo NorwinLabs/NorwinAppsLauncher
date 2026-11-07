@@ -62,6 +62,38 @@ function render() {
 
 search.addEventListener('input', render);
 document.getElementById('settings-btn').onclick = () => settings.showModal();
+const updateBtn = document.getElementById('update-btn');
+const autoUpdate = document.getElementById('auto-update');
+let updateState = { status: 'idle' };
+
+function showUpdate(s) {
+  updateState = s;
+  const labels = {
+    checking: 'Checking…',
+    current: 'Up to date',
+    available: `Update ${s.version} available`,
+    downloading: `Downloading ${s.percent || 0}%`,
+    ready: `Restart to install ${s.version}`,
+    error: 'Update check failed',
+  };
+  updateBtn.textContent = s.status === 'available' ? `${labels.available} – ${s.manual ? 'open' : 'download'}` : labels[s.status] || 'Check for updates';
+  updateBtn.title = s.error || '';
+  updateBtn.disabled = s.status === 'checking' || s.status === 'downloading';
+}
+
+updateBtn.onclick = async () => {
+  if (updateState.status === 'ready') return window.norwin.installUpdate();
+  if (updateState.status === 'available') return window.norwin.downloadUpdate();
+  showUpdate({ status: 'checking' });
+  showUpdate(await window.norwin.checkUpdate());
+};
+window.norwin.onUpdateState(showUpdate);
+autoUpdate.onchange = () => window.norwin.setAutoUpdate(autoUpdate.checked);
+window.norwin.updaterInfo().then((i) => {
+  document.getElementById('app-version').textContent = `v${i.version}`;
+  autoUpdate.checked = i.autoUpdate;
+});
+
 settings.addEventListener('close', () => {
   if (settings.returnValue === 'save') {
     window.norwin.setToken(document.getElementById('token').value);

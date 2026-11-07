@@ -7,5 +7,11 @@ contextBridge.exposeInMainWorld('norwin', {
   openRepo: (repo) => ipcRenderer.invoke('apps:openRepo', repo),
   latestRelease: (repo) => ipcRenderer.invoke('apps:latestRelease', repo),
   setToken: (token) => ipcRenderer.invoke('config:setToken', token),
+  updaterInfo: () => ipcRenderer.invoke('updater:info'),
+  checkUpdate: () => ipcRenderer.invoke('updater:check'),
+  downloadUpdate: () => ipcRenderer.invoke('updater:download'),
+  installUpdate: () => ipcRenderer.invoke('updater:install'),
+  setAutoUpdate: (on) => ipcRenderer.invoke('config:setAutoUpdate', on),
+  onUpdateState: (cb) => ipcRenderer.on('updater:state', (_e, s) => cb(s)),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 });

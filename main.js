@@ -2,6 +2,10 @@ const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { autoUpdater } = require('electron-updater');
+
+const SELF_REPO = 'NorwinLabs/NorwinAppsLauncher';
+let mainWin = null;
 
 const registry = require('./apps.json');
 
@@ -13,7 +17,7 @@ function loadConfig() {
   try {
     return JSON.parse(fs.readFileSync(configFile(), 'utf8'));
   } catch {
-    return { paths: {}, token: '' };
+    return { paths: {}, token: '', autoUpdate: true };
   }
 }
 
@@ -23,7 +27,7 @@ function saveConfig(cfg) {
 }
 
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWin = new BrowserWindow({
     width: 980,
     height: 680,
     backgroundColor: '#0f1115',
@@ -34,6 +38,7 @@ function createWindow() {
       nodeIntegration: false,
     },
   });
+  const win = mainWin;
   win.setMenuBarVisibility(false);
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
@@ -98,6 +103,7 @@ ipcMain.handle('config:setToken', (_e, token) => {
   const cfg = loadConfig();
   cfg.token = String(token || '').trim();
   saveConfig(cfg);
+  if (cfg.token) autoUpdater.addAuthHeader(`Bearer ${cfg.token}`);
   return true;
 });
 
@@ -105,8 +111,73 @@ ipcMain.handle('shell:openExternal', (_e, url) => {
   if (typeof url === 'string' && url.startsWith('https://github.com/')) shell.openExternal(url);
 });
 
+// ---- Self-update (reads GitHub Releases of SELF_REPO) ----
+function sendUpdate(state) {
+  if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('updater:state', state);
+}
+
+function setupUpdater() {
+  const cfg = loadConfig();
+  if (cfg.token) autoUpdater.addAuthHeader(`Bearer ${cfg.token}`);
+  autoUpdater.autoDownload = cfg.autoUpdate !== false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('checking-for-update', () => sendUpdate({ status: 'checking' }));
+  autoUpdater.on('update-available', (i) => sendUpdate({ status: 'available', version: i.version }));
+  autoUpdater.on('update-not-available', () => sendUpdate({ status: 'current' }));
+  autoUpdater.on('download-progress', (p) => sendUpdate({ status: 'downloading', percent: Math.round(p.percent) }));
+  autoUpdater.on('update-downloaded', (i) => sendUpdate({ status: 'ready', version: i.version }));
+  autoUpdater.on('error', (e) => sendUpdate({ status: 'error', error: String(e.message || e) }));
+}
+
+// Dev (unpackaged) builds can't self-update, so just read the repo's latest release.
+async function checkRepoRelease() {
+  const { token } = loadConfig();
+  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'NorwinApps' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(`https://api.github.com/repos/${SELF_REPO}/releases/latest`, { headers });
+  if (res.status === 404) return { status: 'current' };
+  if (!res.ok) return { status: 'error', error: `GitHub ${res.status}` };
+  const tag = (await res.json()).tag_name.replace(/^v/, '');
+  return tag !== app.getVersion() ? { status: 'available', version: tag, manual: true } : { status: 'current' };
+}
+
+ipcMain.handle('updater:info', () => ({
+  version: app.getVersion(),
+  packaged: app.isPackaged,
+  autoUpdate: loadConfig().autoUpdate !== false,
+}));
+
+ipcMain.handle('updater:check', async () => {
+  try {
+    if (!app.isPackaged) return await checkRepoRelease();
+    await autoUpdater.checkForUpdates();
+    return { status: 'checking' };
+  } catch (err) {
+    return { status: 'error', error: String(err.message || err) };
+  }
+});
+
+ipcMain.handle('updater:download', () => {
+  if (app.isPackaged) autoUpdater.downloadUpdate().catch((e) => sendUpdate({ status: 'error', error: String(e.message || e) }));
+  else shell.openExternal(`https://github.com/${SELF_REPO}/releases/latest`);
+});
+
+ipcMain.handle('updater:install', () => autoUpdater.quitAndInstall());
+
+ipcMain.handle('config:setAutoUpdate', (_e, on) => {
+  const cfg = loadConfig();
+  cfg.autoUpdate = !!on;
+  saveConfig(cfg);
+  autoUpdater.autoDownload = cfg.autoUpdate;
+  return true;
+});
+
 app.whenReady().then(() => {
   createWindow();
+  if (app.isPackaged) {
+    setupUpdater();
+    mainWin.webContents.once('did-finish-load', () => autoUpdater.checkForUpdates().catch(() => {}));
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
