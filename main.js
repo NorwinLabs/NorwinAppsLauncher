@@ -77,6 +77,96 @@ ipcMain.handle('apps:launch', (_e, id) => {
   }
 });
 
+// ---- Install apps from their GitHub Releases ----
+function pickAsset(assets) {
+  const re = process.platform === 'win32' ? /\.exe$/i : process.platform === 'darwin' ? /\.dmg$/i : /\.AppImage$/i;
+  const arch = process.arch === 'arm64' ? /arm64|aarch64/i : /x64|x86_64|amd64/i;
+  const c = assets.filter((x) => re.test(x.name) && !/blockmap/i.test(x.name));
+  return c.find((x) => arch.test(x.name)) || c.find((x) => !/arm64|aarch64/i.test(x.name)) || c[0];
+}
+
+function progress(id, text) {
+  if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('apps:installProgress', { id, text });
+}
+
+async function download(asset, dest, headers, id) {
+  const res = await fetch(asset.url, { headers: { ...headers, Accept: 'application/octet-stream' } });
+  if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`);
+  const total = Number(asset.size) || 0;
+  let got = 0;
+  const out = fs.createWriteStream(dest);
+  for await (const chunk of res.body) {
+    got += chunk.length;
+    if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
+    if (total) progress(id, `Downloading ${Math.round((got / total) * 100)}%`);
+  }
+  await new Promise((r, j) => out.end((e) => (e ? j(e) : r())));
+}
+
+function findInstalledExe(a) {
+  const base = process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs');
+  if (!base) return null;
+  for (const n of [a.name, a.id]) {
+    const p = path.join(base, n, `${n}.exe`);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+ipcMain.handle('apps:install', async (_e, id) => {
+  const a = registry.find((x) => x.id === id);
+  if (!a || a.webUrl !== undefined) return { ok: false, error: 'This app cannot be installed.' };
+  const cfg = loadConfig();
+  const headers = { 'User-Agent': 'NorwinApps', Accept: 'application/vnd.github+json' };
+  if (cfg.token) headers.Authorization = `Bearer ${cfg.token}`;
+  try {
+    progress(id, 'Looking up latest release…');
+    const rel = await fetch(`https://api.github.com/repos/${a.repo}/releases/latest`, { headers });
+    if (rel.status === 404) return { ok: false, error: 'No release published yet (or repo is private - add a token in Settings).' };
+    if (!rel.ok) return { ok: false, error: `GitHub ${rel.status}` };
+    const asset = pickAsset((await rel.json()).assets || []);
+    if (!asset) return { ok: false, error: `No ${process.platform} installer in the latest release.` };
+
+    const dir = path.join(app.getPath('userData'), 'apps', a.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const dest = path.join(dir, path.basename(asset.name));
+    await download(asset, dest, headers, id);
+
+    let exe = null;
+    if (process.platform === 'darwin') {
+      await shell.openPath(dest);
+      return { ok: true, message: 'Opened the disk image - drag the app to Applications, then link it.' };
+    }
+    if (process.platform === 'linux' || /portable/i.test(asset.name)) {
+      fs.chmodSync(dest, 0o755);
+      exe = dest;
+    } else {
+      progress(id, 'Installing…');
+      await new Promise((resolve, reject) => {
+        const p = spawn(dest, ['/S'], { stdio: 'ignore' });
+        p.on('error', reject);
+        p.on('exit', resolve);
+      });
+      exe = findInstalledExe(a);
+    }
+    if (exe) {
+      cfg.paths[a.id] = exe;
+      saveConfig(cfg);
+      return { ok: true, message: 'Installed.' };
+    }
+    return { ok: true, message: 'Installed - use "Link exe" to point at it.' };
+  } catch (err) {
+    return { ok: false, error: String(err.message || err) };
+  }
+});
+
+ipcMain.handle('apps:openWeb', (_e, id) => {
+  const a = registry.find((x) => x.id === id);
+  if (!a || !/^https:\/\//.test(a.webUrl || '')) return false;
+  shell.openExternal(a.webUrl);
+  return true;
+});
+
 ipcMain.handle('apps:openRepo', (_e, repo) => {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return false;
   shell.openExternal(`https://github.com/${repo}`);

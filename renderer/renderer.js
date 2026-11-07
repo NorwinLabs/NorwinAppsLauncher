@@ -2,6 +2,10 @@ const grid = document.getElementById('grid');
 const search = document.getElementById('search');
 const settings = document.getElementById('settings');
 let apps = [];
+const msgs = {};
+window.norwin.onInstallProgress(({ id, text }) => {
+  if (msgs[id]) msgs[id].textContent = text;
+});
 
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
@@ -47,6 +51,30 @@ function render() {
       if (r.ok) version.textContent = r.tag ? `Latest: ${r.tag}` : 'No releases';
     };
 
+    let actions = el('div', { className: 'actions' }, launch, link, repo, check);
+    if (a.webUrl !== undefined) {
+      // Web-only app (e.g. NorwinInventory): no install, just open its login page.
+      const login = el('button', { className: 'primary', disabled: !a.webUrl }, a.webUrl ? 'Open login page' : 'Login URL not set');
+      login.onclick = () => window.norwin.openWeb(a.id);
+      actions = el('div', { className: 'actions' }, login, repo);
+      status.textContent = 'Web app';
+    } else if (!a.installed) {
+      const install = el('button', { className: 'primary' }, 'Install');
+      install.onclick = async () => {
+        install.disabled = true;
+        msg.textContent = 'Starting…';
+        const r = await window.norwin.install(a.id);
+        msg.textContent = r.ok ? r.message : r.error;
+        install.disabled = false;
+        if (r.ok) {
+          apps = await window.norwin.listApps();
+          render();
+        }
+      };
+      actions = el('div', { className: 'actions' }, install, link, repo, check);
+    }
+    msgs[a.id] = msg;
+
     grid.append(
       el('section', { className: 'card' },
         el('div', { className: 'card-head' },
@@ -54,7 +82,7 @@ function render() {
           a.private ? el('span', { className: 'badge' }, 'private') : ''),
         el('p', { className: 'desc' }, a.description),
         el('div', { className: 'meta' }, status, version),
-        el('div', { className: 'actions' }, launch, link, repo, check),
+        actions,
         msg)
     );
   }

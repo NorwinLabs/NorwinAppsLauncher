@@ -25,7 +25,8 @@
     "name": "NorwinInventory",
     "description": "Inventory tracking.",
     "repo": "NorwinLabs/NorwinInventory",
-    "private": true
+    "private": true,
+    "webUrl": ""
   },
   {
     "id": "norwinmouseassist",

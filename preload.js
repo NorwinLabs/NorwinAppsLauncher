@@ -13,5 +13,8 @@ contextBridge.exposeInMainWorld('norwin', {
   installUpdate: () => ipcRenderer.invoke('updater:install'),
   setAutoUpdate: (on) => ipcRenderer.invoke('config:setAutoUpdate', on),
   onUpdateState: (cb) => ipcRenderer.on('updater:state', (_e, s) => cb(s)),
+  install: (id) => ipcRenderer.invoke('apps:install', id),
+  openWeb: (id) => ipcRenderer.invoke('apps:openWeb', id),
+  onInstallProgress: (cb) => ipcRenderer.on('apps:installProgress', (_e, p) => cb(p)),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
 });

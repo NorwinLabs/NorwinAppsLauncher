@@ -4,6 +4,8 @@ Desktop hub / launcher for all NorwinLabs apps (NorwinVibe, NorwinPrep, NorwinLa
 
 ## Features
 - One card per app, driven by [`apps.json`](apps.json)
+- Install apps straight from their latest GitHub Release (Windows installer/portable, Linux AppImage, macOS dmg), then launch them
+- Web-only apps (NorwinInventory) just open their login page - set `webUrl` in `apps.json`
 - Link each app's executable once, then launch it from the hub
 - Check each app's latest GitHub release
 - Optional GitHub token (Settings) for private repos like NorwinInventory
