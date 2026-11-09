@@ -1,6 +1,6 @@
 {
   "name": "norwinapps",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Hub / launcher for all NorwinLabs apps",
   "main": "main.js",
   "author": "NorwinLabs",
@@ -10,7 +10,7 @@
     "start": "electron .",
     "dist": "electron-builder",
     "release": "electron-builder --publish always",
-    "test": "node --test test/*.test.js"
+    "test": "node --test"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -28,19 +28,47 @@
       "renderer/**/*"
     ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
       ],
       "hardenedRuntime": true,
       "gatekeeperAssess": false,
-      "notarize": true
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "linux": {
-      "target": "AppImage"
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "publish": [
       {

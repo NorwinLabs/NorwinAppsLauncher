@@ -18,11 +18,15 @@ jobs:
       release: ${{ steps.check.outputs.release }}
     steps:
       - uses: actions/checkout@v4
+      # Skip only when the release already exists AND contains the Windows .exe,
+      # so a partially failed release gets rebuilt on the next push.
       - id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           v="v$(node -p "require('./package.json').version")"
-          if git ls-remote --exit-code --tags origin "refs/tags/$v" >/dev/null 2>&1; then
-            echo "Tag $v already exists - skipping release."
+          if gh release view "$v" --json assets --jq '.assets[].name' 2>/dev/null | grep -qi '\.exe$'; then
+            echo "Release $v already has a Windows installer - skipping."
             echo "release=false" >> "$GITHUB_OUTPUT"
           else
             echo "release=true" >> "$GITHUB_OUTPUT"
@@ -45,12 +49,34 @@ jobs:
       - run: npm test
       # Code signing is optional: add the secrets listed in the README and installers are
       # signed (and macOS notarized) automatically; without them builds stay unsigned.
-      - run: npm run release
+      - name: Build and publish
+        shell: bash
+        run: |
+          # Empty secrets must be unset, otherwise electron-builder treats "" as a certificate path.
+          args=""
+          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
+          if [ -z "$APPLE_ID" ]; then unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; else args="-c.mac.notarize=true"; fi
+          npm run release -- $args
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+  verify:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check release has Windows, macOS and Linux installers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          v="v$(node -p "require('./package.json').version")"
+          names="$(gh release view "$v" --json assets --jq '.assets[].name')"
+          echo "$names"
+          for ext in exe dmg AppImage; do
+            echo "$names" | grep -qi "\.$ext$" || { echo "::error::Release $v is missing a .$ext installer"; exit 1; }
+          done
