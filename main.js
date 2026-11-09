@@ -78,12 +78,66 @@ ipcMain.handle('apps:launch', (_e, id) => {
 });
 
 // ---- Install apps from their GitHub Releases ----
-function pickAsset(assets) {
-  const re = process.platform === 'win32' ? /\.exe$/i : process.platform === 'darwin' ? /\.dmg$/i : /\.AppImage$/i;
-  const arch = process.arch === 'arm64' ? /arm64|aarch64/i : /x64|x86_64|amd64/i;
-  const c = assets.filter((x) => re.test(x.name) && !/blockmap/i.test(x.name));
-  return c.find((x) => arch.test(x.name)) || c.find((x) => !/arm64|aarch64/i.test(x.name)) || c[0];
+const OS_LABEL = { windows: 'Windows', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iOS' };
+const CURRENT_OS = { win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform];
+
+// Work out which OS / CPU architecture a release asset is for, from its file name.
+function classify(name) {
+  if (/blockmap|\.ya?ml$|\.sig$|\.sha\d*$|\.txt$/i.test(name)) return null;
+  let os = null;
+  if (/\.(exe|msi|msix)$/i.test(name)) os = 'windows';
+  else if (/\.(dmg|pkg)$/i.test(name) || /(mac|darwin|osx).*\.zip$/i.test(name)) os = 'macos';
+  else if (/\.(appimage|deb|rpm|snap)$/i.test(name)) os = 'linux';
+  else if (/\.apk$/i.test(name)) os = 'android';
+  else if (/\.ipa$/i.test(name)) os = 'ios';
+  if (!os) return null;
+  const arch = /arm64|aarch64/i.test(name) ? 'arm64'
+    : /universal/i.test(name) ? 'universal'
+    : /x64|x86_64|amd64/i.test(name) ? 'x64'
+    : /ia32|i386|\bx86\b/i.test(name) ? 'ia32'
+    : null;
+  return { os, arch };
 }
+
+function pickAsset(assets) {
+  const ext = process.platform === 'win32' ? /\.exe$/i : process.platform === 'darwin' ? /\.dmg$/i : /\.AppImage$/i;
+  const c = assets.filter((x) => ext.test(x.name) && classify(x.name)?.os === CURRENT_OS);
+  const want = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const arch = (x) => classify(x.name).arch;
+  return c.find((x) => arch(x) === want) || c.find((x) => arch(x) === 'universal' || arch(x) === null)
+    || c.find((x) => arch(x) !== (want === 'arm64' ? 'x64' : 'arm64')) || c[0];
+}
+
+const platformCache = new Map();
+
+// Which platforms does an app's latest release actually ship installers for?
+ipcMain.handle('apps:platforms', async (_e, id) => {
+  const a = registry.find((x) => x.id === id);
+  if (!a || a.webUrl !== undefined) return { ok: true, platforms: [] };
+  const hit = platformCache.get(id);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value;
+  const { token } = loadConfig();
+  const headers = { 'User-Agent': 'NorwinApps', Accept: 'application/vnd.github+json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const res = await fetch(`https://api.github.com/repos/${a.repo}/releases/latest`, { headers });
+    if (res.status === 404) return { ok: true, platforms: [], noRelease: true };
+    if (!res.ok) return { ok: false, error: `GitHub ${res.status}` };
+    const byOs = new Map();
+    for (const x of (await res.json()).assets || []) {
+      const c = classify(x.name);
+      if (!c) continue;
+      if (!byOs.has(c.os)) byOs.set(c.os, new Set());
+      if (c.arch) byOs.get(c.os).add(c.arch);
+    }
+    const platforms = [...byOs].map(([os, archs]) => ({ os, label: OS_LABEL[os], archs: [...archs] }));
+    const value = { ok: true, platforms, current: CURRENT_OS };
+    platformCache.set(id, { at: Date.now(), value });
+    return value;
+  } catch (err) {
+    return { ok: false, error: String(err.message || err) };
+  }
+});
 
 function progress(id, text) {
   if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('apps:installProgress', { id, text });
@@ -125,7 +179,7 @@ ipcMain.handle('apps:install', async (_e, id) => {
     if (rel.status === 404) return { ok: false, error: 'No release published yet (or repo is private - add a token in Settings).' };
     if (!rel.ok) return { ok: false, error: `GitHub ${rel.status}` };
     const asset = pickAsset((await rel.json()).assets || []);
-    if (!asset) return { ok: false, error: `No ${process.platform} installer in the latest release.` };
+    if (!asset) return { ok: false, error: `No ${OS_LABEL[CURRENT_OS] || process.platform} installer for ${process.arch} in the latest release.` };
 
     const dir = path.join(app.getPath('userData'), 'apps', a.id);
     fs.mkdirSync(dir, { recursive: true });

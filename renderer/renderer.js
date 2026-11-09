@@ -3,6 +3,7 @@ const search = document.getElementById('search');
 const settings = document.getElementById('settings');
 let apps = [];
 const msgs = {};
+const platformInfo = {};
 window.norwin.onInstallProgress(({ id, text }) => {
   if (msgs[id]) msgs[id].textContent = text;
 });
@@ -74,6 +75,30 @@ function render() {
       actions = el('div', { className: 'actions' }, install, link, repo, check);
     }
     msgs[a.id] = msg;
+    const badges = el('div', { className: 'platforms' });
+    if (a.webUrl !== undefined) {
+      badges.append(el('span', { className: 'plat' }, 'Web'), el('span', { className: 'plat' }, 'Any device'));
+    } else {
+      const info = platformInfo[a.id];
+      if (!info) {
+        badges.append(el('span', { className: 'plat dim' }, 'Checking platforms…'));
+      } else if (!info.ok) {
+        badges.append(el('span', { className: 'plat dim' }, 'Platforms unknown'));
+      } else if (!info.platforms.length) {
+        badges.append(el('span', { className: 'plat dim' }, info.noRelease ? 'No release yet' : 'No installers'));
+      } else {
+        for (const p of info.platforms) {
+          const archs = p.archs.length ? ` · ${p.archs.join(' / ')}` : '';
+          const isMine = p.os === info.current;
+          badges.append(el('span', { className: `plat${isMine ? ' mine' : ''}`, title: isMine ? 'Works on this device' : '' }, `${p.label}${archs}`));
+        }
+        if (!info.platforms.some((p) => p.os === info.current)) {
+          badges.append(el('span', { className: 'plat warn' }, 'Not available for this OS'));
+          const inst = actions.querySelector('button.primary');
+          if (inst && inst.textContent === 'Install') inst.disabled = true;
+        }
+      }
+    }
 
     grid.append(
       el('section', { className: 'card' },
@@ -81,6 +106,7 @@ function render() {
           el('h2', {}, a.name),
           a.private ? el('span', { className: 'badge' }, 'private') : ''),
         el('p', { className: 'desc' }, a.description),
+        badges,
         el('div', { className: 'meta' }, status, version),
         actions,
         msg)
@@ -132,4 +158,11 @@ settings.addEventListener('close', () => {
 window.norwin.listApps().then((list) => {
   apps = list;
   render();
+  for (const a of apps) {
+    if (a.webUrl !== undefined) continue;
+    window.norwin.platforms(a.id).then((info) => {
+      platformInfo[a.id] = info;
+      render();
+    });
+  }
 });

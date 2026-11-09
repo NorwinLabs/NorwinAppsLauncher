@@ -72,3 +72,12 @@ dialog {
 dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
 dialog label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; margin: 16px 0 0; }
+
+.platforms { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+.plat {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--border, #2a2f3a); color: var(--muted);
+}
+.plat.mine { color: #7ee2a8; border-color: #2f6b4a; }
+.plat.warn { color: #f0b36a; border-color: #7a5a2b; }
+.plat.dim { opacity: .6; }
