@@ -28,9 +28,9 @@
         GitHub token (optional, for checking releases of private repos)
         <input id="token" type="password" autocomplete="off" placeholder="ghp_…" />
       </label>
-      <label>
-        <input id="auto-update" type="checkbox" /> Download updates automatically
-      </label>
+      <label class="check"><input id="autoUpdate" type="checkbox" /> Download launcher updates automatically</label>
+      <label class="check"><input id="launchAfterInstall" type="checkbox" /> Launch apps after installing them</label>
+      <label class="check"><input id="closeToTray" type="checkbox" /> Keep running in the tray when the window is closed</label>
       <menu>
         <button value="cancel">Cancel</button>
         <button id="save-token" value="save">Save</button>

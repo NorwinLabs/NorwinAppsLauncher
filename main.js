@@ -1,29 +1,52 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
-
-const SELF_REPO = 'NorwinLabs/NorwinAppsLauncher';
-let mainWin = null;
+const { OS_LABEL, PLATFORM_TO_OS, classify, pickAsset, normalizeName, parseChecksums, isNewer } = require('./lib/assets');
 
 const registry = require('./apps.json');
 
-// User-specific settings live outside the repo: local exe paths + optional GitHub token
-// (token is only needed to check releases of private repos).
+const SELF_REPO = 'NorwinLabs/NorwinAppsLauncher';
+const CURRENT_OS = PLATFORM_TO_OS[process.platform];
+const ICON = path.join(__dirname, 'assets', 'icon.png');
+
+let mainWin = null;
+let tray = null;
+let isQuitting = false;
+
+// ---- Config (stored in userData, never in the repo) ----
 const configFile = () => path.join(app.getPath('userData'), 'config.json');
+const appsDir = () => path.join(app.getPath('userData'), 'apps');
+const FLAGS = { autoUpdate: true, launchAfterInstall: true, closeToTray: false };
 
 function loadConfig() {
+  let raw = {};
   try {
-    return JSON.parse(fs.readFileSync(configFile(), 'utf8'));
-  } catch {
-    return { paths: {}, token: '', autoUpdate: true };
-  }
+    raw = JSON.parse(fs.readFileSync(configFile(), 'utf8'));
+  } catch {}
+  return { paths: {}, versions: {}, managed: {}, token: '', ...FLAGS, ...raw };
 }
 
 function saveConfig(cfg) {
   fs.mkdirSync(path.dirname(configFile()), { recursive: true });
   fs.writeFileSync(configFile(), JSON.stringify(cfg, null, 2));
+}
+
+function ghHeaders() {
+  const { token } = loadConfig();
+  const h = { 'User-Agent': 'NorwinApps', Accept: 'application/vnd.github+json' };
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
+
+// ---- Window / tray ----
+function showWindow() {
+  if (!mainWin || mainWin.isDestroyed()) return createWindow();
+  if (mainWin.isMinimized()) mainWin.restore();
+  mainWin.show();
+  mainWin.focus();
 }
 
 function createWindow() {
@@ -32,23 +55,50 @@ function createWindow() {
     height: 680,
     backgroundColor: '#0f1115',
     title: 'NorwinApps',
+    icon: ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-  const win = mainWin;
-  win.setMenuBarVisibility(false);
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWin.setMenuBarVisibility(false);
+  mainWin.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  mainWin.on('close', (e) => {
+    if (!isQuitting && tray && loadConfig().closeToTray) {
+      e.preventDefault();
+      mainWin.hide();
+    }
+  });
+  return mainWin;
 }
 
+function createTray() {
+  try {
+    const size = process.platform === 'darwin' ? 18 : 16;
+    tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: size, height: size }));
+    tray.setToolTip('NorwinApps');
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Open NorwinApps', click: showWindow },
+      { label: 'Check for updates', click: () => { showWindow(); mainWin.webContents.send('updater:trigger'); } },
+      { type: 'separator' },
+      { label: 'Quit', click: () => { isQuitting = true; app.quit(); } },
+    ]));
+    tray.on('click', showWindow);
+  } catch {
+    tray = null; // some Linux desktops have no tray; closeToTray is then ignored
+  }
+}
+
+// ---- Apps: list / link / launch ----
 ipcMain.handle('apps:list', () => {
   const cfg = loadConfig();
   return registry.map((a) => ({
     ...a,
     localPath: cfg.paths[a.id] || '',
     installed: !!(cfg.paths[a.id] && fs.existsSync(cfg.paths[a.id])),
+    installedVersion: cfg.versions[a.id] || '',
+    managed: !!cfg.managed[a.id],
   }));
 });
 
@@ -60,12 +110,13 @@ ipcMain.handle('apps:setPath', async (_e, id) => {
   if (res.canceled || !res.filePaths[0]) return null;
   const cfg = loadConfig();
   cfg.paths[id] = res.filePaths[0];
+  delete cfg.managed[id];
+  delete cfg.versions[id];
   saveConfig(cfg);
   return res.filePaths[0];
 });
 
-ipcMain.handle('apps:launch', (_e, id) => {
-  const exe = loadConfig().paths[id];
+function launchExe(exe) {
   if (!exe || !fs.existsSync(exe)) return { ok: false, error: 'Executable not set or missing.' };
   try {
     const child = spawn(exe, [], { detached: true, stdio: 'ignore', cwd: path.dirname(exe) });
@@ -75,86 +126,89 @@ ipcMain.handle('apps:launch', (_e, id) => {
   } catch (err) {
     return { ok: false, error: String(err.message || err) };
   }
-});
-
-// ---- Install apps from their GitHub Releases ----
-const OS_LABEL = { windows: 'Windows', macos: 'macOS', linux: 'Linux', android: 'Android', ios: 'iOS' };
-const CURRENT_OS = { win32: 'windows', darwin: 'macos', linux: 'linux' }[process.platform];
-
-// Work out which OS / CPU architecture a release asset is for, from its file name.
-function classify(name) {
-  if (/blockmap|\.ya?ml$|\.sig$|\.sha\d*$|\.txt$/i.test(name)) return null;
-  let os = null;
-  if (/\.(exe|msi|msix)$/i.test(name)) os = 'windows';
-  else if (/\.(dmg|pkg)$/i.test(name) || /(mac|darwin|osx).*\.zip$/i.test(name)) os = 'macos';
-  else if (/\.(appimage|deb|rpm|snap)$/i.test(name)) os = 'linux';
-  else if (/\.apk$/i.test(name)) os = 'android';
-  else if (/\.ipa$/i.test(name)) os = 'ios';
-  if (!os) return null;
-  const arch = /arm64|aarch64/i.test(name) ? 'arm64'
-    : /universal/i.test(name) ? 'universal'
-    : /x64|x86_64|amd64/i.test(name) ? 'x64'
-    : /ia32|i386|\bx86\b/i.test(name) ? 'ia32'
-    : null;
-  return { os, arch };
 }
 
-function pickAsset(assets) {
-  const ext = process.platform === 'win32' ? /\.exe$/i : process.platform === 'darwin' ? /\.dmg$/i : /\.AppImage$/i;
-  const c = assets.filter((x) => ext.test(x.name) && classify(x.name)?.os === CURRENT_OS);
-  const want = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const arch = (x) => classify(x.name).arch;
-  return c.find((x) => arch(x) === want) || c.find((x) => arch(x) === 'universal' || arch(x) === null)
-    || c.find((x) => arch(x) !== (want === 'arm64' ? 'x64' : 'arm64')) || c[0];
-}
+ipcMain.handle('apps:launch', (_e, id) => launchExe(loadConfig().paths[id]));
 
-const platformCache = new Map();
+// ---- Releases ----
+const releaseCache = new Map();
 
-// Which platforms does an app's latest release actually ship installers for?
-ipcMain.handle('apps:platforms', async (_e, id) => {
-  const a = registry.find((x) => x.id === id);
-  if (!a || a.webUrl !== undefined) return { ok: true, platforms: [] };
-  const hit = platformCache.get(id);
-  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value;
-  const { token } = loadConfig();
-  const headers = { 'User-Agent': 'NorwinApps', Accept: 'application/vnd.github+json' };
-  if (token) headers.Authorization = `Bearer ${token}`;
+async function getRelease(repo, force = false) {
+  const hit = releaseCache.get(repo);
+  if (!force && hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.value;
   try {
-    const res = await fetch(`https://api.github.com/repos/${a.repo}/releases/latest`, { headers });
-    if (res.status === 404) return { ok: true, platforms: [], noRelease: true };
-    if (!res.ok) return { ok: false, error: `GitHub ${res.status}` };
-    const byOs = new Map();
-    for (const x of (await res.json()).assets || []) {
-      const c = classify(x.name);
-      if (!c) continue;
-      if (!byOs.has(c.os)) byOs.set(c.os, new Set());
-      if (c.arch) byOs.get(c.os).add(c.arch);
+    const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: ghHeaders() });
+    let value;
+    if (res.status === 404) value = { ok: true, noRelease: true, tag: '', assets: [] };
+    else if (!res.ok) return { ok: false, error: `GitHub ${res.status}` };
+    else {
+      const data = await res.json();
+      value = { ok: true, tag: data.tag_name, url: data.html_url, assets: data.assets || [] };
     }
-    const platforms = [...byOs].map(([os, archs]) => ({ os, label: OS_LABEL[os], archs: [...archs] }));
-    const value = { ok: true, platforms, current: CURRENT_OS };
-    platformCache.set(id, { at: Date.now(), value });
+    releaseCache.set(repo, { at: Date.now(), value });
     return value;
   } catch (err) {
     return { ok: false, error: String(err.message || err) };
   }
+}
+
+ipcMain.handle('apps:platforms', async (_e, id) => {
+  const a = registry.find((x) => x.id === id);
+  if (!a || a.webUrl !== undefined) return { ok: true, platforms: [] };
+  const rel = await getRelease(a.repo);
+  if (!rel.ok) return rel;
+  const byOs = new Map();
+  for (const x of rel.assets) {
+    const c = classify(x.name);
+    if (!c) continue;
+    if (!byOs.has(c.os)) byOs.set(c.os, new Set());
+    if (c.arch) byOs.get(c.os).add(c.arch);
+  }
+  return {
+    ok: true,
+    noRelease: rel.noRelease,
+    tag: rel.tag,
+    current: CURRENT_OS,
+    platforms: [...byOs].map(([os, archs]) => ({ os, label: OS_LABEL[os], archs: [...archs] })),
+    updateAvailable: isNewer(loadConfig().versions[id], rel.tag),
+  };
 });
 
+// ---- Install / uninstall ----
 function progress(id, text) {
   if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('apps:installProgress', { id, text });
 }
 
-async function download(asset, dest, headers, id) {
-  const res = await fetch(asset.url, { headers: { ...headers, Accept: 'application/octet-stream' } });
+// Streams an asset to disk; returns its sha512 (base64) so it can be verified.
+async function download(asset, dest, id) {
+  const res = await fetch(asset.url, { headers: { ...ghHeaders(), Accept: 'application/octet-stream' } });
   if (!res.ok || !res.body) throw new Error(`Download failed (${res.status})`);
   const total = Number(asset.size) || 0;
+  const hash = crypto.createHash('sha512');
   let got = 0;
   const out = fs.createWriteStream(dest);
   for await (const chunk of res.body) {
     got += chunk.length;
+    hash.update(chunk);
     if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
     if (total) progress(id, `Downloading ${Math.round((got / total) * 100)}%`);
   }
   await new Promise((r, j) => out.end((e) => (e ? j(e) : r())));
+  return hash.digest('base64');
+}
+
+async function fetchText(asset) {
+  const res = await fetch(asset.url, { headers: { ...ghHeaders(), Accept: 'application/octet-stream' } });
+  return res.ok ? res.text() : '';
+}
+
+// electron-builder releases ship latest*.yml with a sha512 for every installer.
+async function expectedChecksums(assets) {
+  const map = new Map();
+  for (const y of assets.filter((x) => /^latest.*\.yml$/i.test(x.name)).slice(0, 4)) {
+    try { parseChecksums(await fetchText(y), map); } catch {}
+  }
+  return map;
 }
 
 function findInstalledExe(a) {
@@ -167,48 +221,88 @@ function findInstalledExe(a) {
   return null;
 }
 
+const runAndWait = (file, args) => new Promise((resolve, reject) => {
+  const p = spawn(file, args, { stdio: 'ignore' });
+  p.on('error', reject);
+  p.on('exit', resolve);
+});
+
 ipcMain.handle('apps:install', async (_e, id) => {
   const a = registry.find((x) => x.id === id);
   if (!a || a.webUrl !== undefined) return { ok: false, error: 'This app cannot be installed.' };
-  const cfg = loadConfig();
-  const headers = { 'User-Agent': 'NorwinApps', Accept: 'application/vnd.github+json' };
-  if (cfg.token) headers.Authorization = `Bearer ${cfg.token}`;
   try {
     progress(id, 'Looking up latest release…');
-    const rel = await fetch(`https://api.github.com/repos/${a.repo}/releases/latest`, { headers });
-    if (rel.status === 404) return { ok: false, error: 'No release published yet (or repo is private - add a token in Settings).' };
-    if (!rel.ok) return { ok: false, error: `GitHub ${rel.status}` };
-    const asset = pickAsset((await rel.json()).assets || []);
+    const rel = await getRelease(a.repo, true);
+    if (!rel.ok) return { ok: false, error: rel.error };
+    if (rel.noRelease) return { ok: false, error: 'No release published yet (or repo is private - add a token in Settings).' };
+    const asset = pickAsset(rel.assets, process.platform, process.arch);
     if (!asset) return { ok: false, error: `No ${OS_LABEL[CURRENT_OS] || process.platform} installer for ${process.arch} in the latest release.` };
 
-    const dir = path.join(app.getPath('userData'), 'apps', a.id);
+    const dir = path.join(appsDir(), a.id);
     fs.mkdirSync(dir, { recursive: true });
     const dest = path.join(dir, path.basename(asset.name));
-    await download(asset, dest, headers, id);
+    const [expected, digest] = await Promise.all([expectedChecksums(rel.assets), download(asset, dest, id)]);
 
+    const want = expected.get(normalizeName(asset.name));
+    if (want && want !== digest) {
+      fs.rmSync(dest, { force: true });
+      return { ok: false, error: 'Checksum mismatch - the download was discarded and nothing was installed.' };
+    }
+    const note = want ? '' : ' (no checksum published - not verified)';
+
+    const cfg = loadConfig();
     let exe = null;
     if (process.platform === 'darwin') {
       await shell.openPath(dest);
-      return { ok: true, message: 'Opened the disk image - drag the app to Applications, then link it.' };
+      return { ok: true, message: `Opened the disk image - drag the app to Applications, then link it.${note}` };
     }
     if (process.platform === 'linux' || /portable/i.test(asset.name)) {
       fs.chmodSync(dest, 0o755);
       exe = dest;
+      const old = cfg.paths[a.id];
+      if (old && old !== dest && old.startsWith(dir)) fs.rmSync(old, { force: true });
     } else {
       progress(id, 'Installing…');
-      await new Promise((resolve, reject) => {
-        const p = spawn(dest, ['/S'], { stdio: 'ignore' });
-        p.on('error', reject);
-        p.on('exit', resolve);
-      });
+      await runAndWait(dest, ['/S']);
+      fs.rmSync(dest, { force: true });
       exe = findInstalledExe(a);
     }
-    if (exe) {
-      cfg.paths[a.id] = exe;
-      saveConfig(cfg);
-      return { ok: true, message: 'Installed.' };
+    if (!exe) return { ok: true, message: `Installed - use "Link exe" to point at it.${note}` };
+
+    cfg.paths[a.id] = exe;
+    cfg.versions[a.id] = rel.tag;
+    cfg.managed[a.id] = true;
+    saveConfig(cfg);
+    if (cfg.launchAfterInstall) launchExe(exe);
+    return { ok: true, message: `Installed ${rel.tag}${cfg.launchAfterInstall ? ' and launched' : ''}.${note}` };
+  } catch (err) {
+    return { ok: false, error: String(err.message || err) };
+  }
+});
+
+ipcMain.handle('apps:uninstall', async (_e, id) => {
+  const a = registry.find((x) => x.id === id);
+  const cfg = loadConfig();
+  const exe = cfg.paths[id];
+  if (!a || !cfg.managed[id] || !exe) return { ok: false, error: 'Only apps installed from here can be uninstalled.' };
+  try {
+    const dir = path.dirname(exe);
+    if (exe.startsWith(appsDir())) {
+      fs.rmSync(dir, { recursive: true, force: true }); // AppImage / portable build
+    } else if (process.platform === 'win32') {
+      const un = fs.existsSync(dir) && fs.readdirSync(dir).find((f) => /^uninstall.*\.exe$/i.test(f));
+      if (!un) return { ok: false, error: 'Could not find the uninstaller. Remove it from Windows Settings > Apps.' };
+      progress(id, 'Uninstalling…');
+      await runAndWait(path.join(dir, un), ['/S', `_?=${dir}`]);
+      fs.rmSync(dir, { recursive: true, force: true });
+    } else {
+      return { ok: false, error: 'Remove the app manually, then it will unlink here.' };
     }
-    return { ok: true, message: 'Installed - use "Link exe" to point at it.' };
+    delete cfg.paths[id];
+    delete cfg.versions[id];
+    delete cfg.managed[id];
+    saveConfig(cfg);
+    return { ok: true, message: 'Uninstalled.' };
   } catch (err) {
     return { ok: false, error: String(err.message || err) };
   }
@@ -229,24 +323,31 @@ ipcMain.handle('apps:openRepo', (_e, repo) => {
 
 ipcMain.handle('apps:latestRelease', async (_e, repo) => {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return { ok: false, error: 'Bad repo' };
-  const { token } = loadConfig();
-  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'NorwinApps' };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  try {
-    const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers });
-    if (res.status === 404) return { ok: true, tag: null };
-    if (!res.ok) return { ok: false, error: `GitHub ${res.status}` };
-    const data = await res.json();
-    return { ok: true, tag: data.tag_name, url: data.html_url };
-  } catch (err) {
-    return { ok: false, error: String(err.message || err) };
-  }
+  const rel = await getRelease(repo, true);
+  if (!rel.ok) return rel;
+  return { ok: true, tag: rel.noRelease ? null : rel.tag, url: rel.url };
+});
+
+// ---- Settings ----
+ipcMain.handle('config:get', () => {
+  const cfg = loadConfig();
+  return { autoUpdate: cfg.autoUpdate, launchAfterInstall: cfg.launchAfterInstall, closeToTray: cfg.closeToTray, hasTray: !!tray };
+});
+
+ipcMain.handle('config:setFlag', (_e, key, value) => {
+  if (!(key in FLAGS)) return false;
+  const cfg = loadConfig();
+  cfg[key] = !!value;
+  saveConfig(cfg);
+  if (key === 'autoUpdate') autoUpdater.autoDownload = cfg.autoUpdate;
+  return true;
 });
 
 ipcMain.handle('config:setToken', (_e, token) => {
   const cfg = loadConfig();
   cfg.token = String(token || '').trim();
   saveConfig(cfg);
+  releaseCache.clear();
   if (cfg.token) autoUpdater.addAuthHeader(`Bearer ${cfg.token}`);
   return true;
 });
@@ -263,7 +364,7 @@ function sendUpdate(state) {
 function setupUpdater() {
   const cfg = loadConfig();
   if (cfg.token) autoUpdater.addAuthHeader(`Bearer ${cfg.token}`);
-  autoUpdater.autoDownload = cfg.autoUpdate !== false;
+  autoUpdater.autoDownload = cfg.autoUpdate;
   autoUpdater.autoInstallOnAppQuit = true;
   autoUpdater.on('checking-for-update', () => sendUpdate({ status: 'checking' }));
   autoUpdater.on('update-available', (i) => sendUpdate({ status: 'available', version: i.version }));
@@ -275,21 +376,13 @@ function setupUpdater() {
 
 // Dev (unpackaged) builds can't self-update, so just read the repo's latest release.
 async function checkRepoRelease() {
-  const { token } = loadConfig();
-  const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'NorwinApps' };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`https://api.github.com/repos/${SELF_REPO}/releases/latest`, { headers });
-  if (res.status === 404) return { status: 'current' };
-  if (!res.ok) return { status: 'error', error: `GitHub ${res.status}` };
-  const tag = (await res.json()).tag_name.replace(/^v/, '');
-  return tag !== app.getVersion() ? { status: 'available', version: tag, manual: true } : { status: 'current' };
+  const rel = await getRelease(SELF_REPO, true);
+  if (!rel.ok) return { status: 'error', error: rel.error };
+  const tag = rel.tag.replace(/^v/, '');
+  return !rel.noRelease && isNewer(app.getVersion(), tag) ? { status: 'available', version: tag, manual: true } : { status: 'current' };
 }
 
-ipcMain.handle('updater:info', () => ({
-  version: app.getVersion(),
-  packaged: app.isPackaged,
-  autoUpdate: loadConfig().autoUpdate !== false,
-}));
+ipcMain.handle('updater:info', () => ({ version: app.getVersion(), packaged: app.isPackaged }));
 
 ipcMain.handle('updater:check', async () => {
   try {
@@ -306,27 +399,29 @@ ipcMain.handle('updater:download', () => {
   else shell.openExternal(`https://github.com/${SELF_REPO}/releases/latest`);
 });
 
-ipcMain.handle('updater:install', () => autoUpdater.quitAndInstall());
-
-ipcMain.handle('config:setAutoUpdate', (_e, on) => {
-  const cfg = loadConfig();
-  cfg.autoUpdate = !!on;
-  saveConfig(cfg);
-  autoUpdater.autoDownload = cfg.autoUpdate;
-  return true;
+ipcMain.handle('updater:install', () => {
+  isQuitting = true;
+  autoUpdater.quitAndInstall();
 });
 
-app.whenReady().then(() => {
-  createWindow();
-  if (app.isPackaged) {
-    setupUpdater();
-    mainWin.webContents.once('did-finish-load', () => autoUpdater.checkForUpdates().catch(() => {}));
-  }
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+// ---- App lifecycle ----
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', showWindow);
+  app.on('before-quit', () => { isQuitting = true; });
+
+  app.whenReady().then(() => {
+    createWindow();
+    createTray();
+    if (app.isPackaged) {
+      setupUpdater();
+      mainWin.webContents.once('did-finish-load', () => autoUpdater.checkForUpdates().catch(() => {}));
+    }
+    app.on('activate', showWindow);
   });
-});
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+}

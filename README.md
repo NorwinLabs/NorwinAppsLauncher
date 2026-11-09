@@ -26,6 +26,21 @@ npm run dist
 - **Self-update:** installed builds read this repo's GitHub Releases (via `electron-updater`) on startup and from the **Check for updates** button, download the new version (toggle in Settings) and install on restart. Unpackaged dev runs only report whether a newer release exists.
 - Note: macOS auto-update requires a code-signed app; unsigned mac builds must be updated manually. Private repos need the GitHub token in Settings.
 
+## Code signing (optional)
+Add these repository secrets and the release workflow signs installers automatically; without them builds are unsigned.
+- `CSC_LINK` (base64 `.p12`/`.pfx` certificate) and `CSC_KEY_PASSWORD` - signs Windows and macOS builds
+- `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` - notarizes macOS builds (needed for macOS auto-update)
+
+## Installing apps
+- Installers are checked against the SHA-512 in the release's `latest*.yml` before running; a mismatch discards the download.
+- The launcher remembers which version it installed, shows **Update** when a newer release exists, and can **Uninstall** apps it installed.
+- Settings: launch after install, and keep running in the system tray when the window is closed.
+
+## Tests
+```bash
+npm test
+```
+
 ## Adding an app
 Add an entry to `apps.json`:
 

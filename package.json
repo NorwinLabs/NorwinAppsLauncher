@@ -1,6 +1,6 @@
 {
   "name": "norwinapps",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Hub / launcher for all NorwinLabs apps",
   "main": "main.js",
   "author": "NorwinLabs",
@@ -9,7 +9,8 @@
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
-    "release": "electron-builder --publish always"
+    "release": "electron-builder --publish always",
+    "test": "node --test test/*.test.js"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -22,6 +23,8 @@
       "main.js",
       "preload.js",
       "apps.json",
+      "lib/**/*",
+      "assets/**/*",
       "renderer/**/*"
     ],
     "win": {
@@ -31,7 +34,10 @@
       "target": [
         "dmg",
         "zip"
-      ]
+      ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "notarize": true
     },
     "linux": {
       "target": "AppImage"

@@ -81,3 +81,5 @@ dialog menu { display: flex; justify-content: flex-end; gap: 8px; padding: 0; ma
 .plat.mine { color: #7ee2a8; border-color: #2f6b4a; }
 .plat.warn { color: #f0b36a; border-color: #7a5a2b; }
 .plat.dim { opacity: .6; }
+dialog label.check { flex-direction: row; align-items: center; gap: 8px; margin-top: 10px; }
+.version.update { color: #7ee2a8; }
