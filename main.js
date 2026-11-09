@@ -211,12 +211,53 @@ async function expectedChecksums(assets) {
   return map;
 }
 
-function findInstalledExe(a) {
-  const base = process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs');
-  if (!base) return null;
-  for (const n of [a.name, a.id]) {
-    const p = path.join(base, n, `${n}.exe`);
-    if (fs.existsSync(p)) return p;
+const exists = (p) => { try { return !!p && fs.statSync(p).isFile(); } catch { return false; } };
+
+function log(msg) {
+  try {
+    fs.appendFileSync(path.join(app.getPath('userData'), 'launcher.log'), `${new Date().toISOString()} ${msg}\n`);
+  } catch {}
+}
+
+const capture = (cmd, args) => new Promise((resolve) => {
+  let out = '';
+  const p = spawn(cmd, args, { windowsHide: true });
+  p.stdout.on('data', (d) => { out += d; });
+  p.on('error', () => resolve(''));
+  p.on('close', () => resolve(out));
+});
+
+// NSIS installers register themselves under ...\Uninstall\<key> with the real install folder.
+async function findViaRegistry(a) {
+  const sub = '\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall';
+  const roots = ['HKCU' + sub, 'HKLM' + sub, 'HKLM\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall'];
+  for (const root of roots) {
+    const found = await capture('reg', ['query', root, '/s', '/f', a.name, '/d']);
+    for (const key of found.split(/\r?\n/).filter((l) => /^HK/i.test(l.trim()))) {
+      const vals = {};
+      for (const m of (await capture('reg', ['query', key.trim()])).matchAll(/^\s+(\S+)\s+REG_\w+\s+(.*?)\r?$/gm)) vals[m[1]] = m[2];
+      if (!String(vals.DisplayName || '').toLowerCase().includes(a.name.toLowerCase())) continue;
+      const icon = String(vals.DisplayIcon || '').replace(/^"|"$/g, '').replace(/,-?\d+$/, '').replace(/"/g, '');
+      if (/\.exe$/i.test(icon) && !/uninstall/i.test(path.basename(icon)) && exists(icon)) return icon;
+      const dir = String(vals.InstallLocation || '').replace(/"/g, '');
+      if (dir && fs.existsSync(dir)) {
+        const exe = fs.readdirSync(dir).find((f) => /\.exe$/i.test(f) && !/uninstall|update/i.test(f) && f.toLowerCase().startsWith(a.name.toLowerCase().slice(0, 6)));
+        if (exe) return path.join(dir, exe);
+      }
+    }
+  }
+  return null;
+}
+
+async function findInstalledExe(a) {
+  const viaReg = await findViaRegistry(a).catch(() => null);
+  if (viaReg) return viaReg;
+  const bases = [process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs'), process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean);
+  for (const base of bases) {
+    for (const n of [a.name, a.id]) {
+      const p = path.join(base, n, `${n}.exe`);
+      if (exists(p)) return p;
+    }
   }
   return null;
 }
@@ -224,7 +265,7 @@ function findInstalledExe(a) {
 const runAndWait = (file, args) => new Promise((resolve, reject) => {
   const p = spawn(file, args, { stdio: 'ignore' });
   p.on('error', reject);
-  p.on('exit', resolve);
+  p.on('exit', (code) => resolve(code));
 });
 
 ipcMain.handle('apps:install', async (_e, id) => {
@@ -263,9 +304,26 @@ ipcMain.handle('apps:install', async (_e, id) => {
       if (old && old !== dest && old.startsWith(dir)) fs.rmSync(old, { force: true });
     } else {
       progress(id, 'Installing…');
-      await runAndWait(dest, ['/S']);
+      const code = await runAndWait(dest, ['/S']);
+      log(`install ${a.id} ${rel.tag}: installer exit code ${code}`);
+      // Give the installer a moment to finish writing its files / registry entries.
+      for (let i = 0; i < 10 && !exe; i++) {
+        exe = await findInstalledExe(a);
+        if (!exe) await new Promise((r) => setTimeout(r, 1000));
+      }
+      log(`install ${a.id}: found exe ${exe}`);
+      if (code && !exe) return { ok: false, error: `The installer exited with code ${code}. Try running ${path.basename(dest)} yourself from ${dir}.` };
       fs.rmSync(dest, { force: true });
-      exe = findInstalledExe(a);
+      if (!exe) {
+        // Could not locate the install automatically: let the user point at it once.
+        const pick = await dialog.showOpenDialog({
+          title: `Installed - select ${a.name}'s executable to link it`,
+          defaultPath: process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'Programs') : undefined,
+          properties: ['openFile'],
+          filters: [{ name: 'Executable', extensions: ['exe'] }],
+        });
+        exe = pick.canceled ? null : pick.filePaths[0];
+      }
     }
     if (!exe) return { ok: true, message: `Installed - use "Link exe" to point at it.${note}` };
 

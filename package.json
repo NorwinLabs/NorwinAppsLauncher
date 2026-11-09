@@ -1,6 +1,6 @@
 {
   "name": "norwinapps",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Hub / launcher for all NorwinLabs apps",
   "main": "main.js",
   "author": "NorwinLabs",

@@ -14,7 +14,14 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
-const plat = (text, cls = '', title = '') => el('span', { className: `plat ${cls}`.trim(), title }, text);
+const plat = (text, cls = '', title = '') => el('span', { className: `pill ${cls}`.trim(), title }, text);
+const pct = {}; // id -> download percentage
+
+function hue(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return h;
+}
 
 async function reload() {
   apps = await window.norwin.listApps();
@@ -22,7 +29,7 @@ async function reload() {
 }
 
 function platformBadges(a, info) {
-  const row = el('div', { className: 'platforms' });
+  const row = el('div', { className: 'avail' });
   if (a.webUrl !== undefined) {
     row.append(plat('Web'), plat('Any device'));
   } else if (!info) {
@@ -60,6 +67,7 @@ function render() {
       render();
       const r = await fn();
       busy[a.id] = false;
+      pct[a.id] = 0;
       msgText[a.id] = r.ok ? r.message : r.error;
       if (r.ok) delete platformInfo[a.id];
       await reload();
@@ -67,9 +75,8 @@ function render() {
     };
 
     const btn = (label, onclick, cls = '', disabled = false) =>
-      el('button', { className: cls, onclick, disabled: disabled || !!busy[a.id] }, label);
+      el('button', { className: `btn ${cls === 'primary' ? 'solid' : cls}`.trim(), onclick, disabled: disabled || !!busy[a.id] }, label);
 
-    const repo = btn('Repo', () => window.norwin.openRepo(a.repo));
     let actions;
     let status = a.installed ? 'Ready' : 'Not linked';
     let version = '';
@@ -78,10 +85,9 @@ function render() {
       status = 'Web app';
       actions = [
         btn(a.webUrl ? 'Open login page' : 'Login URL not set', () => window.norwin.openWeb(a.id), 'primary', !a.webUrl),
-        btn('Repo', () => window.norwin.openRepo(a.repo)),
       ];
     } else if (a.installed) {
-      if (a.installedVersion) status = `Installed ${a.installedVersion}`;
+      if (a.installedVersion) status = 'Installed';
       if (info && info.ok && info.tag) version = update ? `Update: ${info.tag}` : a.installedVersion ? 'Up to date' : `Latest: ${info.tag}`;
       actions = [
         btn('Launch', async () => {
@@ -97,16 +103,14 @@ function render() {
       if (a.managed) {
         actions.push(btn('Uninstall', () => {
           if (confirm(`Uninstall ${a.name}?`)) run(() => window.norwin.uninstall(a.id))();
-        }));
+        }, 'warn'));
       }
-      actions.push(repo);
     } else {
       actions = [
         btn('Install', run(() => window.norwin.install(a.id)), 'primary', noInstaller),
         btn('Link exe', async () => {
           if (await window.norwin.setPath(a.id)) reload();
         }),
-        repo,
         btn('Check release', async () => {
           msgText[a.id] = '…';
           render();
@@ -117,18 +121,31 @@ function render() {
       ];
     }
 
+    const fact = (k, v, cls = '') => el('div', { className: `fact ${cls}`.trim() }, el('div', { className: 'k' }, k), el('div', { className: 'v' }, v));
+    const bar = el('div', { className: `bar${busy[a.id] ? '' : ' hide'}${pct[a.id] ? '' : ' ind'}` }, el('i'));
+    if (pct[a.id]) bar.firstChild.style.width = `${pct[a.id]}%`;
+    bar.dataset.id = a.id;
+    const srcBtn = el('button', { className: 'src mono', title: 'Open on GitHub', onclick: () => window.norwin.openRepo(a.repo) }, 'GitHub ↗');
+    const h = hue(a.name);
+    const icon = el('div', { className: 'icon' }, a.name.replace(/^Norwin/, '').charAt(0) || 'N');
+    icon.style.background = `linear-gradient(135deg,hsl(${h} 70% 48%),hsl(${(h + 40) % 360} 70% 36%))`;
+
     grid.append(
       el('section', { className: 'card' },
-        el('div', { className: 'card-head' },
-          el('h2', {}, a.name),
-          a.private ? el('span', { className: 'badge' }, 'private') : ''),
-        el('p', { className: 'desc' }, a.description),
-        platformBadges(a, info),
-        el('div', { className: 'meta' },
-          el('span', { className: 'status' }, status),
-          el('span', { className: `version${update ? ' update' : ''}` }, version)),
-        el('div', { className: 'actions' }, ...actions),
-        msg)
+        el('div', { className: 'top' }, el('span', { className: `ver mono${update ? ' upd' : ''}` }, version || (web ? 'Web' : '')), srcBtn),
+        el('div', { className: 'body' },
+          el('div', { className: 'head' },
+            icon,
+            el('div', { className: 'titles' },
+              el('div', { className: 'title' }, a.name, a.private ? el('span', { className: 'by' }, 'private') : ''),
+              el('div', { className: 'tag' }, a.description))),
+          platformBadges(a, info),
+          el('div', { className: 'facts' },
+            fact('Status', status, a.installed ? 'good' : ''),
+            fact('Version', a.installedVersion || (info && info.tag) || '—', update ? 'bad' : '')),
+          el('div', { className: 'actions' }, ...actions),
+          bar,
+          msg))
     );
   }
 }
@@ -136,6 +153,14 @@ function render() {
 // Live progress ("Downloading 42%") updates the message in place without a full re-render.
 window.norwin.onInstallProgress(({ id, text }) => {
   msgText[id] = text;
+  const m = /(\d+)%/.exec(text);
+  pct[id] = m ? Number(m[1]) : 0;
+  const b = grid.querySelector(`.bar[data-id="${id}"]`);
+  if (b) {
+    b.classList.remove('hide');
+    b.classList.toggle('ind', !m);
+    if (m) b.firstChild.style.width = `${m[1]}%`;
+  }
   const node = grid.querySelector(`.msg[data-id="${id}"]`);
   if (node) node.textContent = text;
 });
