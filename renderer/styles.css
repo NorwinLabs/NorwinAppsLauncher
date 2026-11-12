@@ -16,7 +16,7 @@ header {
   height: 48px; display: flex; align-items: center; border-bottom: 1px solid var(--line);
   position: sticky; top: 0; background: var(--bg); z-index: 20; padding: 0 12px 0 0;
 }
-.brand { display: flex; align-items: center; padding: 0 18px; font-weight: 800; font-size: 18px; letter-spacing: .1em; height: 100%; }
+.brand { display: flex; align-items: center; padding: 0 18px; font-weight: 800; font-size: 18px; letter-spacing: .04em; height: 100%; white-space: nowrap; }
 .brand i { font-style: normal; margin-right: 8px; display: inline-block; width: 16px; height: 16px; border: 2px solid #fff; border-radius: 5px; transform: rotate(45deg) scale(.85); }
 .sub { display: flex; align-items: center; padding: 0 18px; border-left: 1px solid var(--line); color: var(--mut); letter-spacing: .28em; height: 24px; }
 .spacer { flex: 1; }
@@ -49,7 +49,7 @@ main { padding: 16px 16px 64px; margin: 0 auto; max-width: 1280px; }
 .head { display: flex; gap: 16px; align-items: center; }
 .icon {
   width: 56px; height: 56px; border-radius: 15px; flex: none; display: flex; align-items: center; justify-content: center;
-  font-size: 26px; font-weight: 800; color: #fff; box-shadow: inset 0 0 0 1px #ffffff22, 0 4px 14px #0008;
+  font-size: 26px; font-weight: 800; color: #fff; background: #10131a; border: 1px solid var(--line2);
 }
 .titles { min-width: 0; }
 .title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 22px; font-weight: 700; line-height: 1.15; letter-spacing: -.01em; }

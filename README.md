@@ -1,4 +1,4 @@
-# NorwinAppsLauncher
+# NorwinApps Launcher
 
 Desktop hub / launcher for all NorwinLabs apps (NorwinVibe, NorwinPrep, NorwinLabsTools, NorwinInventory, …).
 

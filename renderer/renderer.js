@@ -17,12 +17,6 @@ function el(tag, props = {}, ...children) {
 const plat = (text, cls = '', title = '') => el('span', { className: `pill ${cls}`.trim(), title }, text);
 const pct = {}; // id -> download percentage
 
-function hue(name) {
-  let h = 0;
-  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 360;
-  return h;
-}
-
 async function reload() {
   apps = await window.norwin.listApps();
   render();
@@ -126,9 +120,7 @@ function render() {
     if (pct[a.id]) bar.firstChild.style.width = `${pct[a.id]}%`;
     bar.dataset.id = a.id;
     const srcBtn = el('button', { className: 'src mono', title: 'Open on GitHub', onclick: () => window.norwin.openRepo(a.repo) }, 'GitHub ↗');
-    const h = hue(a.name);
     const icon = el('div', { className: 'icon' }, a.name.replace(/^Norwin/, '').charAt(0) || 'N');
-    icon.style.background = `linear-gradient(135deg,hsl(${h} 70% 48%),hsl(${(h + 40) % 360} 70% 36%))`;
 
     grid.append(
       el('section', { className: 'card' },

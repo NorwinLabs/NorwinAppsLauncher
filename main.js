@@ -53,8 +53,8 @@ function createWindow() {
   mainWin = new BrowserWindow({
     width: 980,
     height: 680,
-    backgroundColor: '#0f1115',
-    title: 'NorwinApps',
+    backgroundColor: '#0d0f14',
+    title: 'NorwinApps Launcher',
     icon: ICON,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -77,9 +77,9 @@ function createTray() {
   try {
     const size = process.platform === 'darwin' ? 18 : 16;
     tray = new Tray(nativeImage.createFromPath(ICON).resize({ width: size, height: size }));
-    tray.setToolTip('NorwinApps');
+    tray.setToolTip('NorwinApps Launcher');
     tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Open NorwinApps', click: showWindow },
+      { label: 'Open NorwinApps Launcher', click: showWindow },
       { label: 'Check for updates', click: () => { showWindow(); mainWin.webContents.send('updater:trigger'); } },
       { type: 'separator' },
       { label: 'Quit', click: () => { isQuitting = true; app.quit(); } },
